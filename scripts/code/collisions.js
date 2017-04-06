@@ -54,7 +54,7 @@ const particle = (
     return o
 }
 
-const box = (mass=random(5, 50), ...rest) => {
+const orb = (mass, ...rest) => {
     let o = particle(...rest)
     o.mass = mass
     return o
@@ -91,14 +91,9 @@ const applyForce = (p, m, a) => {
     return p
 }
 
-let particles = Array(200)
-    .fill(true)
-    .map(_ => box())
-
-const FRICTION = .1
+const FRICTION = 0.1
 
 const app = () => {
-    let p = 0
     const {obs, rAF} = clanFp
 
     // canvas resizing
@@ -117,50 +112,90 @@ const app = () => {
         })
     size(true)
 
-    const pipeline = obs([])
+    //------> MOUSE / INPUT
+    const mouse =
+        obs()
+        .from(fn => window.addEventListener('mousedown', fn)) // try 'mousemove' :)
+        .map(({clientX, clientY}) => [clientX, clientY])
+        .then(([x,y]) =>
+            pipeline(
+                pipeline().concat(orb(random(10,100), [x,y]))))
+
+    const pipeline = obs()
         , refresh = ps => pipeline(ps)
-        , positions = [[0,0], [canvas.width,0], [canvas.width,canvas.height], [0,canvas.height]]
-        , nextPos = $ => positions[p++ % 4]
-        , mouse = obs(nextPos())
+        , render = ps => rAF($ => refresh(ps))
+        , applyPhysics = ps => ps.map(p => update(p, FRICTION))
         , applyGravity = ps =>
             pipeline(
                 ps.map(p =>
                     applyForce(
                         p
-                        , 20 / p.mass
-                        , normalize(sub(mouse(), p.position))
+                        , 1
+                        , [0,3.2]
                     )))
+        , detectBoundaries = ps =>
+            ps.map(p => {
+                if((p.position[1] + .5*p.mass) >= canvas.height) {
+                    p.position[1] = canvas.height - .5*p.mass
+                    p.velocity = [p.velocity[0], p.velocity[1]*-1]
+                }
+                if((p.position[0] - .5*p.mass) < 0) {
+                    p.position[0] = .5*p.mass
+                    p.velocity[0] = p.velocity[0]*-1
+                }
+                if((p.position[0] + .5*p.mass) > canvas.width) {
+                    p.position[0] = canvas.width - .5*p.mass
+                    p.velocity[0] = p.velocity[0]*-1
+                }
+                return p
+            })
+        , detectCollisions = ps => {
+            for(let i = 0, len = ps.length; i < len; i++){
+                let p1 = ps[i]
+                for(let j = 0, len = ps.length; j < len; j++){
+                    let p2 = ps[j]
+                    if(p1 === p2) continue
+                    let distance = mag(sub(p2.position, p1.position))
+
+                    if(distance < (p2.mass+p1.mass)/2){
+                        // transfer energy?
+                        let {velocity: p1v, position: p1p} = p1
+                            , {velocity: p2v, position: p2p} = p2
+
+                        // direction away from collision
+                        let diff = normalize(sub(p1.position, p2.position))
+                        ps[i] = applyForce(p1, p2.mass * .1, scale(diff, 1))
+                    }
+                }
+            }
+        }
         , draw = ps => {
             c.fillStyle = '#000'
             c.fillRect(0,0,canvas.width,canvas.height)
+
             // draw particles
-            c.fillStyle = '#ccc'
+            c.fillStyle = 'red'
             for(let i = 0, len = ps.length; i < len; i++){
                 let {position, mass} = ps[i]
-                    , [x,y] = position
-                c.fillRect(x-mass/2,y-mass/2,mass,mass)
+                let [x,y] = position
+                c.beginPath()
+                c.arc(x, y, mass/2, 0, 2*Math.PI)
+                c.fill()
             }
-
-            // draw mouse
-            c.fillStyle = 'hotpink'
-            let mouse_size = 30,
-                half = mouse_size/2,
-                [x,y] = mouse()
-            c.fillRect(x-half,y-half,mouse_size,mouse_size)
         }
 
     // game loop
     pipeline
         .debounce(16)
-        .map(ps =>
-            ps.map(p => update(p, FRICTION)))
-        .then(ps => rAF($ => refresh(ps)))
+        .map(applyPhysics)
+        .map(detectBoundaries)
+        .then(render)
         .then(draw)
-        .then(ps => applyGravity(ps))
+        .then(applyGravity)
+        .then(detectCollisions)
 
-    setInterval($ => mouse(nextPos()), 4000)
-
-    pipeline(particles)
+    pipeline([])
+    mouse([0,0])
 }
 
 require('clan-fp@0.0.58').then(app).catch(e => log(e+''))

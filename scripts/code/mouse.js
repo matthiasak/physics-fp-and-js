@@ -54,7 +54,7 @@ const particle = (
     return o
 }
 
-const box = (mass=random(5, 50), ...rest) => {
+const box = (mass=random(5, 10), ...rest) => {
     let o = particle(...rest)
     o.mass = mass
     return o
@@ -91,14 +91,13 @@ const applyForce = (p, m, a) => {
     return p
 }
 
-let particles = Array(200)
+let particles = Array(20)
     .fill(true)
     .map(_ => box())
 
 const FRICTION = .1
 
 const app = () => {
-    let p = 0
     const {obs, rAF} = clanFp
 
     // canvas resizing
@@ -117,11 +116,15 @@ const app = () => {
         })
     size(true)
 
-    const pipeline = obs([])
+    //------> MOUSE / INPUT
+    const mouse =
+        obs()
+        .from(fn => window.addEventListener('mousemove', fn))
+        .map(({clientX, clientY}) => [clientX, clientY])
+    mouse([0,0])
+
+    const pipeline = obs()
         , refresh = ps => pipeline(ps)
-        , positions = [[0,0], [canvas.width,0], [canvas.width,canvas.height], [0,canvas.height]]
-        , nextPos = $ => positions[p++ % 4]
-        , mouse = obs(nextPos())
         , applyGravity = ps =>
             pipeline(
                 ps.map(p =>
@@ -157,8 +160,6 @@ const app = () => {
         .then(ps => rAF($ => refresh(ps)))
         .then(draw)
         .then(ps => applyGravity(ps))
-
-    setInterval($ => mouse(nextPos()), 4000)
 
     pipeline(particles)
 }

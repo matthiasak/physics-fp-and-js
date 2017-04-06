@@ -54,18 +54,11 @@ const particle = (
     return o
 }
 
-const box = (mass=random(5, 50), ...rest) => {
+const flame = (size = random(40,80), ...rest) => {
     let o = particle(...rest)
-    o.mass = mass
+    o.size = size
     return o
 }
-
-const logEm = (a) =>
-    a.map(({position}) => {
-          log(`x: ${position[0]}`)
-          log(`y: ${position[1]}`)
-          log(`-----------`)
-    })
 
 const update = (p, friction=1) => {
     let [[px,py], [vx,vy], [ax,ay]] =
@@ -91,14 +84,9 @@ const applyForce = (p, m, a) => {
     return p
 }
 
-let particles = Array(200)
-    .fill(true)
-    .map(_ => box())
-
-const FRICTION = .1
+const FRICTION = 0.1
 
 const app = () => {
-    let p = 0
     const {obs, rAF} = clanFp
 
     // canvas resizing
@@ -117,50 +105,83 @@ const app = () => {
         })
     size(true)
 
-    const pipeline = obs([])
+    //------> MOUSE / INPUT
+    const mouse =
+        obs()
+        .from(fn => window.addEventListener('mousemove', fn))
+        .map(({clientX, clientY}) => [clientX, clientY])
+
+    obs()
+    .from(fn => window.addEventListener('mousedown', fn))
+    .then($ => pipeline(
+        pipeline()
+        .concat(
+            Array(300)
+            .fill(true)
+            .map(x => {
+                let f = flame()
+                f.position = mouse()
+                return f
+            }))))
+
+    const pipeline = obs()
         , refresh = ps => pipeline(ps)
-        , positions = [[0,0], [canvas.width,0], [canvas.width,canvas.height], [0,canvas.height]]
-        , nextPos = $ => positions[p++ % 4]
-        , mouse = obs(nextPos())
-        , applyGravity = ps =>
-            pipeline(
-                ps.map(p =>
-                    applyForce(
-                        p
-                        , 20 / p.mass
-                        , normalize(sub(mouse(), p.position))
-                    )))
+        , render = ps => rAF($ => refresh(ps))
+        , applyPhysics = ps => ps.map(p => update(p, FRICTION))
+        , wind = ps => ps.map(p => applyForce(p, p.size*.02, [random(-2,2),-1]))
+        , notoffscreen = ps => ps.filter(({position, size}) => (position[1] > -1*size) && (size>1))
+        , addflame = ps => {
+            let f = flame()
+            f.position = mouse()
+            pipeline(ps.push(f))
+        }
+        , shrink = ps => ps.map(p => {
+            p.size *= .98
+            return p
+        })
+        , color = (size) => {
+            const sMin = 10,
+                  sMax = 80,
+                  min = 0x0000ff,
+                  max = 0xee0000
+
+            let diff = sMax - Math.max(size - sMin, sMin)
+            return ~~(diff/(sMax - sMin)*(max-min))
+        }
+        , removeGreen = (num) => {
+            let rgb = num.toString(16)
+            return `${rgb.slice(0,2)}00${rgb.slice(4)}`
+        }
         , draw = ps => {
             c.fillStyle = '#000'
             c.fillRect(0,0,canvas.width,canvas.height)
-            // draw particles
-            c.fillStyle = '#ccc'
-            for(let i = 0, len = ps.length; i < len; i++){
-                let {position, mass} = ps[i]
-                    , [x,y] = position
-                c.fillRect(x-mass/2,y-mass/2,mass,mass)
-            }
 
-            // draw mouse
-            c.fillStyle = 'hotpink'
-            let mouse_size = 30,
-                half = mouse_size/2,
-                [x,y] = mouse()
-            c.fillRect(x-half,y-half,mouse_size,mouse_size)
+            // draw particles
+            c.fillStyle = 'red'
+            for(let i = 0, len = ps.length; i < len; i++){
+                let {position, mass, size} = ps[i]
+                c.fillStyle = '#'+removeGreen(color(size))
+                let [x,y] = position
+                c.beginPath()
+                c.arc(x, y, size/2, 0, 2*Math.PI)
+                c.fill()
+                c.closePath()
+            }
         }
 
     // game loop
     pipeline
-        .debounce(16)
-        .map(ps =>
-            ps.map(p => update(p, FRICTION)))
-        .then(ps => rAF($ => refresh(ps)))
+        .debounce()
+        .map(notoffscreen)
+        .map(applyPhysics)
+        .map(wind)
+        .map(shrink)
         .then(draw)
-        .then(ps => applyGravity(ps))
+        .then(render)
+        .then(addflame)
 
-    setInterval($ => mouse(nextPos()), 4000)
-
-    pipeline(particles)
+    mouse([canvas.width/2, canvas.height])
+    pipeline([])
 }
 
 require('clan-fp@0.0.58').then(app).catch(e => log(e+''))

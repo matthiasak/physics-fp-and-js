@@ -54,12 +54,6 @@ const particle = (
     return o
 }
 
-const box = (mass=random(5, 50), ...rest) => {
-    let o = particle(...rest)
-    o.mass = mass
-    return o
-}
-
 const logEm = (a) =>
     a.map(({position}) => {
           log(`x: ${position[0]}`)
@@ -91,14 +85,10 @@ const applyForce = (p, m, a) => {
     return p
 }
 
-let particles = Array(200)
-    .fill(true)
-    .map(_ => box())
 
 const FRICTION = .1
 
 const app = () => {
-    let p = 0
     const {obs, rAF} = clanFp
 
     // canvas resizing
@@ -117,36 +107,64 @@ const app = () => {
         })
     size(true)
 
-    const pipeline = obs([])
+    //------> Particles
+    let cols = ~~(canvas.width/30),
+        rows = ~~(canvas.height/30)
+
+    let particles =
+        Array(cols*(rows+2)*(cols+2))
+        .fill(true)
+        .map((v,i,arr) => {
+            let w = canvas.width,
+                h = canvas.height
+            return particle(
+                [
+                    (w/cols)*(i%(cols+1)),
+                    (h/rows)*~~(i/(cols+1))
+                ],
+                [0,0],
+                [0,0])
+        })
+
+    //------> MOUSE / INPUT
+    const mouse =
+        obs()
+        .from(fn => window.addEventListener('mousemove', fn))
+        .map(({clientX, clientY}) => [clientX, clientY])
+    mouse([0,0])
+
+    const pipeline = obs()
         , refresh = ps => pipeline(ps)
-        , positions = [[0,0], [canvas.width,0], [canvas.width,canvas.height], [0,canvas.height]]
-        , nextPos = $ => positions[p++ % 4]
-        , mouse = obs(nextPos())
-        , applyGravity = ps =>
-            pipeline(
-                ps.map(p =>
-                    applyForce(
-                        p
-                        , 20 / p.mass
-                        , normalize(sub(mouse(), p.position))
-                    )))
         , draw = ps => {
+
+            // draw background
             c.fillStyle = '#000'
             c.fillRect(0,0,canvas.width,canvas.height)
+
             // draw particles
-            c.fillStyle = '#ccc'
+            c.strokeStyle = '#ccc'
+            c.lineWidth = 1
+            c.lineCap = 'round'
+
             for(let i = 0, len = ps.length; i < len; i++){
                 let {position, mass} = ps[i]
-                    , [x,y] = position
-                c.fillRect(x-mass/2,y-mass/2,mass,mass)
-            }
+                c.beginPath()
+                let [x,y] = position,
+                    diff = sub(mouse(), position),
+                    n = scale(normalize(diff), 20),
+                    lineWidth = Math.min(
+                        Math.max(
+                            ~~(canvas.width / mag(diff)),
+                            1
+                        ),
+                    100)
 
-            // draw mouse
-            c.fillStyle = 'hotpink'
-            let mouse_size = 30,
-                half = mouse_size/2,
-                [x,y] = mouse()
-            c.fillRect(x-half,y-half,mouse_size,mouse_size)
+                c.lineWidth = lineWidth
+                c.moveTo(x,y)
+                c.lineTo(...add(position,n))
+                c.stroke()
+                c.closePath()
+            }
         }
 
     // game loop
@@ -156,9 +174,6 @@ const app = () => {
             ps.map(p => update(p, FRICTION)))
         .then(ps => rAF($ => refresh(ps)))
         .then(draw)
-        .then(ps => applyGravity(ps))
-
-    setInterval($ => mouse(nextPos()), 4000)
 
     pipeline(particles)
 }
